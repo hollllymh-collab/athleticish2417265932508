@@ -80,6 +80,8 @@
     letter-spacing:0.02em;
     opacity:0.9;
     margin-left:2px;
+    color:var(--cyan);
+    -webkit-text-fill-color:var(--cyan);
   }
   .brand-stripe{
     position:relative;
@@ -1044,6 +1046,7 @@ function renderExercise(routine, ex){
   const fieldsHtml = ex.type === 'hold'
     ? `
       <div class="field"><label>Sets</label><input type="text" inputmode="numeric" placeholder="3" value="${escapeAttr(ex.sets)}" data-field="sets"></div>
+      <div class="field"><label>Reps per set</label><input type="text" inputmode="numeric" placeholder="1" value="${escapeAttr(ex.reps)}" data-field="reps"></div>
       <div class="field"><label>Hold (sec)</label><input type="text" inputmode="numeric" placeholder="30" value="${escapeAttr(ex.duration)}" data-field="duration"></div>
     `
     : `
@@ -1128,6 +1131,7 @@ let seqRemaining = 0;
 
 function buildSequence(ex){
   const sets = Math.max(1, parseInt(ex.sets, 10) || 1);
+  const reps = Math.max(1, parseInt(ex.reps, 10) || 1);
   const restBefore = parseInt(ex.restBefore, 10) || 0;
   const restBetween = parseInt(ex.rest, 10) || 0;
   const restAfter = parseInt(ex.restAfter, 10) || 0;
@@ -1136,15 +1140,25 @@ function buildSequence(ex){
 
   if(restBefore > 0) seq.push({ kind: 'rest', label: 'Rest before', seconds: restBefore });
 
-  for(let i = 1; i <= sets; i++){
-    seq.push({ kind: 'prep', label: 'Get ready', seconds: 3, setNum: i, totalSets: sets });
+  for(let s = 1; s <= sets; s++){
+    seq.push({ kind: 'prep', label: 'Get ready', seconds: 3, setNum: s, totalSets: sets });
+
     if(ex.type === 'hold' && holdSeconds > 0){
-      seq.push({ kind: 'work', label: 'Hold', seconds: holdSeconds, setNum: i, totalSets: sets });
+      for(let r = 1; r <= reps; r++){
+        seq.push({
+          kind: 'work', label: 'Hold', seconds: holdSeconds,
+          setNum: s, totalSets: sets, repNum: r, totalReps: reps
+        });
+      }
     } else {
-      seq.push({ kind: 'manual', label: ex.type === 'hold' ? 'Hold' : 'Do your reps', setNum: i, totalSets: sets });
+      seq.push({
+        kind: 'manual', label: ex.type === 'hold' ? 'Hold' : 'Do your reps',
+        setNum: s, totalSets: sets, totalReps: ex.type === 'reps' ? reps : null
+      });
     }
-    if(i < sets && restBetween > 0){
-      seq.push({ kind: 'rest', label: 'Rest between sets', seconds: restBetween, setNum: i, totalSets: sets });
+
+    if(s < sets && restBetween > 0){
+      seq.push({ kind: 'rest', label: 'Rest between sets', seconds: restBetween, setNum: s, totalSets: sets });
     }
   }
 
@@ -1161,6 +1175,13 @@ function startExerciseSequence(ex){
   advanceSequence();
 }
 
+function progressText(step){
+  let parts = [];
+  if(step.totalSets) parts.push('Set ' + step.setNum + ' of ' + step.totalSets);
+  if(step.totalReps && step.kind === 'work') parts.push('Hold ' + step.repNum + ' of ' + step.totalReps);
+  return parts.join(' · ');
+}
+
 function advanceSequence(){
   clearInterval(seqInterval);
   seqIndex++;
@@ -1173,18 +1194,22 @@ function advanceSequence(){
   const progress = document.getElementById('timer-set-progress');
   const bigNum = document.getElementById('timer-big-number');
   const manualBtn = document.getElementById('timer-manual-btn');
+  const overlay = document.getElementById('timer-overlay');
 
-  progress.textContent = step.totalSets ? ('Set ' + step.setNum + ' of ' + step.totalSets) : '';
+  progress.textContent = progressText(step);
 
   if(step.kind === 'manual'){
-    label.textContent = step.label;
-    bigNum.textContent = '';
-    bigNum.className = 'timer-big-number';
+    label.textContent = step.totalReps ? ('Do ' + step.totalReps + ' reps') : step.label;
+    bigNum.textContent = step.totalReps ? step.totalReps : '';
+    bigNum.className = 'timer-big-number ' + (step.totalReps ? 'work' : '');
     manualBtn.classList.remove('hidden');
-    manualBtn.onclick = () => { manualBtn.classList.add('hidden'); tone('go'); vibrate([120]); advanceSequence(); };
+    const goNext = () => { manualBtn.classList.add('hidden'); overlay.onclick = null; tone('go'); vibrate([120]); advanceSequence(); };
+    manualBtn.onclick = (e) => { e.stopPropagation(); goNext(); };
+    overlay.onclick = goNext;
     return;
   }
 
+  overlay.onclick = null;
   manualBtn.classList.add('hidden');
   label.textContent = step.kind === 'prep' ? 'Get ready' : (step.kind === 'work' ? 'Hold' : step.label);
   seqRemaining = step.seconds;
@@ -1217,6 +1242,7 @@ function advanceSequence(){
 }
 
 function finishSequence(){
+  document.getElementById('timer-overlay').onclick = null;
   document.getElementById('timer-phase-label').textContent = 'Done';
   document.getElementById('timer-set-progress').textContent = '';
   document.getElementById('timer-big-number').className = 'timer-big-number work';
@@ -1229,11 +1255,12 @@ function finishSequence(){
 
 function closeTimerOverlay(){
   clearInterval(seqInterval);
+  document.getElementById('timer-overlay').onclick = null;
   document.getElementById('timer-overlay').classList.add('hidden');
 }
 
-document.getElementById('timer-close-btn').onclick = closeTimerOverlay;
-document.getElementById('timer-skip-btn').onclick = () => { tone('go'); advanceSequence(); };
+document.getElementById('timer-close-btn').onclick = (e) => { e.stopPropagation(); closeTimerOverlay(); };
+document.getElementById('timer-skip-btn').onclick = (e) => { e.stopPropagation(); tone('go'); advanceSequence(); };
 
 /* ---------- Audio + vibration ---------- */
 
