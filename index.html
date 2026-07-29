@@ -115,7 +115,21 @@
   .sync-dot.ok{background:var(--good);}
   .sync-dot.busy{background:var(--cyan); animation:pulse 1s infinite;}
   .sync-dot.err{background:var(--danger);}
+  .sync-dot.dirty{background:#f5a623;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+  .save-btn{
+    background:var(--grad);
+    border:none;
+    color:var(--bg);
+    font-family:inherit;
+    font-weight:700;
+    font-size:12px;
+    padding:7px 14px;
+    border-radius:8px;
+    cursor:pointer;
+  }
+  .save-btn:disabled{opacity:.5; cursor:default;}
 
   .subtle-btn{
     background:transparent;
@@ -360,7 +374,27 @@
     min-width:80px;
   }
   .routine-name-input:focus{outline:none; border-bottom-color:var(--purple);}
-  .routine-actions{display:flex; gap:8px;}
+  .routine-time-estimate{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    color:var(--text-faint);
+    margin-top:2px;
+  }
+  .routine-actions{display:flex; align-items:center; gap:8px;}
+  .start-routine-btn{
+    background:var(--grad);
+    border:none;
+    color:var(--bg);
+    font-family:inherit;
+    font-weight:700;
+    font-size:12.5px;
+    padding:9px 16px;
+    border-radius:9px;
+    cursor:pointer;
+    box-shadow:0 0 16px rgba(157,123,240,0.35);
+    white-space:nowrap;
+  }
+  .start-routine-btn:disabled{opacity:.4; cursor:default; box-shadow:none;}
   .icon-btn{
     background:transparent;
     border:1px solid var(--border);
@@ -490,6 +524,16 @@
     align-items:center;
     margin-top:10px;
   }
+  .exercise-bottom-left{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .time-estimate{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11.5px;
+    color:var(--text-faint);
+  }
   .timer-btn{
     background:transparent;
     border:1px solid var(--cyan);
@@ -561,7 +605,7 @@
 
   .timing-row{
     display:grid;
-    grid-template-columns:repeat(3, 1fr);
+    grid-template-columns:repeat(auto-fit, minmax(110px, 1fr));
     gap:8px;
     margin-top:8px;
   }
@@ -569,7 +613,6 @@
 
   @media (max-width:480px){
     .fields{grid-template-columns:repeat(2, 1fr);}
-    .timing-row{grid-template-columns:repeat(3, 1fr);}
   }
 
   /* Big timer overlay */
@@ -684,7 +727,10 @@
     </div>
     <div class="header-right">
       <div class="sync-status" id="sync-status"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">Not connected</span></div>
-      <button class="icon-btn" id="settings-btn" title="Settings">⚙</button>
+      <div class="io-row">
+        <button class="save-btn" id="save-btn">Save</button>
+        <button class="icon-btn" id="settings-btn" title="Settings">⚙</button>
+      </div>
     </div>
   </header>
 
@@ -696,7 +742,7 @@
   </main>
 
   <footer>
-    <span id="footer-text">Data syncs to a private jsonbin.io bin</span>
+    <span id="footer-text">Tap Save to sync to your private jsonbin.io bin</span>
   </footer>
 </div>
 
@@ -907,24 +953,42 @@ async function tryAutoConnect(){
   }
 }
 
-/* ---------- Debounced save ---------- */
+/* ---------- Manual save (no auto network push) ---------- */
+
+let isDirty = false;
 
 function queueSave(){
+  isDirty = true;
   if(!token || !binId){
     setSyncStatus('', 'Not connected');
+  } else {
+    setSyncStatus('dirty', 'Unsaved changes');
+  }
+}
+
+async function saveNow(){
+  if(!token || !binId){
+    openSettings();
     return;
   }
+  const btn = document.getElementById('save-btn');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
   setSyncStatus('busy', 'Saving…');
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try{
-      await pushBinData(binId, state);
-      setSyncStatus('ok', 'Synced just now');
-    }catch(e){
-      setSyncStatus('err', 'Sync failed — check connection');
-    }
-  }, 900);
+  try{
+    await pushBinData(binId, state);
+    isDirty = false;
+    setSyncStatus('ok', 'Saved');
+  }catch(e){
+    setSyncStatus('err', 'Save failed — check connection');
+  }finally{
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 }
+
+document.getElementById('save-btn').onclick = saveNow;
 
 /* ---------- Data helpers ---------- */
 
@@ -983,14 +1047,18 @@ function renderRoutineBody(){
   const body = document.getElementById('routine-body');
   body.innerHTML = '';
 
+  const totalSeconds = routine.exercises.reduce((sum, ex) => sum + computeExerciseSeconds(ex), 0);
+
   const head = document.createElement('div');
   head.className = 'routine-head';
   head.innerHTML = `
     <div class="routine-head-left">
       <div class="routine-kicker">Routine ${String(routineIdx + 1).padStart(2, '0')}</div>
       <input class="routine-name-input" value="${escapeAttr(routine.name)}" id="routine-name-field">
+      <div class="routine-time-estimate" id="routine-time-estimate">${routine.exercises.length ? '~' + formatDuration(totalSeconds) + ' total' : ''}</div>
     </div>
     <div class="routine-actions">
+      <button class="start-routine-btn" id="start-routine-btn" ${routine.exercises.length ? '' : 'disabled'}>Start Routine</button>
       <button class="icon-btn" id="delete-routine-btn" title="Delete routine">×</button>
     </div>
   `;
@@ -1002,6 +1070,7 @@ function renderRoutineBody(){
     renderTabs();
   });
   document.getElementById('delete-routine-btn').onclick = () => deleteRoutine(routine.id);
+  document.getElementById('start-routine-btn').onclick = () => startRoutineSequence(routine);
 
   if(routine.exercises.length === 0){
     const empty = document.createElement('div');
@@ -1020,12 +1089,48 @@ function renderRoutineBody(){
   addBtn.onclick = () => {
     routine.exercises.push({
       id: uid(), name: '', type: 'reps', sets: '', reps: '', rest: '', duration: '',
-      restBefore: '', restAfter: '', notes: ''
+      restBefore: '', restAfter: '', restBetweenReps: '', notes: ''
     });
     queueSave();
     render();
   };
   body.appendChild(addBtn);
+}
+
+function computeExerciseSeconds(ex){
+  const sets = Math.max(1, parseInt(ex.sets, 10) || 1);
+  const reps = Math.max(1, parseInt(ex.reps, 10) || 1);
+  const restBefore = parseInt(ex.restBefore, 10) || 0;
+  const restBetweenSets = parseInt(ex.rest, 10) || 0;
+  const restAfter = parseInt(ex.restAfter, 10) || 0;
+  const restBetweenReps = parseInt(ex.restBetweenReps, 10) || 0;
+  const holdSeconds = parseInt(ex.duration, 10) || 0;
+  const PREP = 3;
+  const APPROX_SEC_PER_REP = 3;
+
+  let perSetWork;
+  if(ex.type === 'hold' && holdSeconds > 0){
+    perSetWork = PREP + reps * holdSeconds + Math.max(0, reps - 1) * restBetweenReps;
+  } else {
+    perSetWork = PREP + reps * APPROX_SEC_PER_REP;
+  }
+
+  const total = restBefore + sets * perSetWork + Math.max(0, sets - 1) * restBetweenSets + restAfter;
+  return total;
+}
+
+function formatDuration(totalSeconds){
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return m > 0 ? (m + ':' + String(sec).padStart(2, '0')) : (sec + 's');
+}
+
+function updateRoutineTimeEstimate(routine){
+  const el = document.getElementById('routine-time-estimate');
+  if(!el) return;
+  const totalSeconds = routine.exercises.reduce((sum, ex) => sum + computeExerciseSeconds(ex), 0);
+  el.textContent = routine.exercises.length ? ('~' + formatDuration(totalSeconds) + ' total') : '';
 }
 
 function renderExercise(routine, ex){
@@ -1044,6 +1149,19 @@ function renderExercise(routine, ex){
       <div class="field"><label>Reps</label><input type="text" placeholder="12" value="${escapeAttr(ex.reps)}" data-field="reps"></div>
     `;
 
+  const timingHtml = ex.type === 'hold'
+    ? `
+      <div class="field"><label>Rest before (sec)</label><input type="text" inputmode="numeric" placeholder="0" value="${escapeAttr(ex.restBefore)}" data-field="restBefore"></div>
+      <div class="field"><label>Rest between reps (sec)</label><input type="text" inputmode="numeric" placeholder="0" value="${escapeAttr(ex.restBetweenReps)}" data-field="restBetweenReps"></div>
+      <div class="field"><label>Rest between sets (sec)</label><input type="text" inputmode="numeric" placeholder="30" value="${escapeAttr(ex.rest)}" data-field="rest"></div>
+      <div class="field"><label>Rest after (sec)</label><input type="text" inputmode="numeric" placeholder="0" value="${escapeAttr(ex.restAfter)}" data-field="restAfter"></div>
+    `
+    : `
+      <div class="field"><label>Rest before (sec)</label><input type="text" inputmode="numeric" placeholder="0" value="${escapeAttr(ex.restBefore)}" data-field="restBefore"></div>
+      <div class="field"><label>Rest between sets (sec)</label><input type="text" inputmode="numeric" placeholder="30" value="${escapeAttr(ex.rest)}" data-field="rest"></div>
+      <div class="field"><label>Rest after (sec)</label><input type="text" inputmode="numeric" placeholder="0" value="${escapeAttr(ex.restAfter)}" data-field="restAfter"></div>
+    `;
+
   card.innerHTML = `
     <div class="exercise-top">
       <span class="drag-handle">::</span>
@@ -1058,24 +1176,27 @@ function renderExercise(routine, ex){
       <button data-type="hold" class="${ex.type === 'hold' ? 'active' : ''}">Hold</button>
     </div>
     <div class="fields">${fieldsHtml}</div>
-    <div class="timing-row">
-      <div class="field"><label>Rest before (sec)</label><input type="text" inputmode="numeric" placeholder="0" value="${escapeAttr(ex.restBefore)}" data-field="restBefore"></div>
-      <div class="field"><label>Rest between sets (sec)</label><input type="text" inputmode="numeric" placeholder="30" value="${escapeAttr(ex.rest)}" data-field="rest"></div>
-      <div class="field"><label>Rest after (sec)</label><input type="text" inputmode="numeric" placeholder="0" value="${escapeAttr(ex.restAfter)}" data-field="restAfter"></div>
-    </div>
+    <div class="timing-row">${timingHtml}</div>
     <div class="notes-row">
       <input placeholder="Notes (optional)" value="${escapeAttr(ex.notes || '')}" data-field="notes">
     </div>
     <div class="exercise-bottom">
-      <button class="timer-btn" data-timer-id="${ex.id}">Start</button>
+      <div class="exercise-bottom-left">
+        <button class="timer-btn" data-timer-id="${ex.id}">Start</button>
+        <span class="time-estimate" id="est-${ex.id}">~${formatDuration(computeExerciseSeconds(ex))}</span>
+      </div>
       <button class="remove-ex">Remove</button>
     </div>
   `;
+
+  const estEl = card.querySelector('#est-' + ex.id);
 
   card.querySelectorAll('[data-field]').forEach(input => {
     input.addEventListener('input', e => {
       ex[e.target.dataset.field] = e.target.value;
       queueSave();
+      estEl.textContent = '~' + formatDuration(computeExerciseSeconds(ex));
+      updateRoutineTimeEstimate(routine);
     });
   });
 
@@ -1114,6 +1235,8 @@ function renderExercise(routine, ex){
 
 /* ---------- Big fullscreen timer sequencer ---------- */
 
+let routineQueue = [];
+let routineQueueIndex = -1;
 let sequence = [];
 let seqIndex = -1;
 let seqInterval = null;
@@ -1125,6 +1248,7 @@ function buildSequence(ex){
   const restBefore = parseInt(ex.restBefore, 10) || 0;
   const restBetween = parseInt(ex.rest, 10) || 0;
   const restAfter = parseInt(ex.restAfter, 10) || 0;
+  const restBetweenReps = parseInt(ex.restBetweenReps, 10) || 0;
   const holdSeconds = parseInt(ex.duration, 10) || 0;
   const seq = [];
 
@@ -1139,6 +1263,9 @@ function buildSequence(ex){
           kind: 'work', label: 'Hold', seconds: holdSeconds,
           setNum: s, totalSets: sets, repNum: r, totalReps: reps
         });
+        if(r < reps && restBetweenReps > 0){
+          seq.push({ kind: 'rest', label: 'Rest between reps', seconds: restBetweenReps, setNum: s, totalSets: sets });
+        }
       }
     } else {
       seq.push({
@@ -1158,15 +1285,47 @@ function buildSequence(ex){
 }
 
 function startExerciseSequence(ex){
+  routineQueue = [ex];
+  routineQueueIndex = 0;
+  document.getElementById('timer-overlay').classList.remove('hidden');
+  loadExerciseAtQueueIndex();
+}
+
+function startRoutineSequence(routine){
+  if(!routine.exercises.length) return;
+  routineQueue = routine.exercises;
+  routineQueueIndex = 0;
+  document.getElementById('timer-overlay').classList.remove('hidden');
+  loadExerciseAtQueueIndex();
+}
+
+function loadExerciseAtQueueIndex(){
+  const ex = routineQueue[routineQueueIndex];
   sequence = buildSequence(ex);
   seqIndex = -1;
   document.getElementById('timer-exname').textContent = ex.name || 'Exercise';
-  document.getElementById('timer-overlay').classList.remove('hidden');
   advanceSequence();
+}
+
+function transitionToNextExercise(){
+  clearInterval(seqInterval);
+  document.getElementById('timer-overlay').onclick = null;
+  document.getElementById('timer-manual-btn').classList.add('hidden');
+  const nextEx = routineQueue[routineQueueIndex];
+  document.getElementById('timer-exname').textContent = nextEx.name || 'Exercise';
+  document.getElementById('timer-phase-label').textContent = 'Up next';
+  document.getElementById('timer-set-progress').textContent = 'Exercise ' + (routineQueueIndex + 1) + ' of ' + routineQueue.length;
+  const bigNum = document.getElementById('timer-big-number');
+  bigNum.className = 'timer-big-number rest';
+  bigNum.textContent = '';
+  tone('phaseEnd');
+  vibrate([100, 60, 100]);
+  setTimeout(loadExerciseAtQueueIndex, 1300);
 }
 
 function progressText(step){
   let parts = [];
+  if(routineQueue.length > 1) parts.push('Exercise ' + (routineQueueIndex + 1) + ' of ' + routineQueue.length);
   if(step.totalSets) parts.push('Set ' + step.setNum + ' of ' + step.totalSets);
   if(step.totalReps && step.kind === 'work') parts.push('Hold ' + step.repNum + ' of ' + step.totalReps);
   return parts.join(' · ');
@@ -1176,7 +1335,12 @@ function advanceSequence(){
   clearInterval(seqInterval);
   seqIndex++;
   if(seqIndex >= sequence.length){
-    finishSequence();
+    routineQueueIndex++;
+    if(routineQueueIndex < routineQueue.length){
+      transitionToNextExercise();
+    } else {
+      finishSequence();
+    }
     return;
   }
   const step = sequence[seqIndex];
@@ -1233,7 +1397,7 @@ function advanceSequence(){
 
 function finishSequence(){
   document.getElementById('timer-overlay').onclick = null;
-  document.getElementById('timer-phase-label').textContent = 'Done';
+  document.getElementById('timer-phase-label').textContent = routineQueue.length > 1 ? 'Routine complete' : 'Done';
   document.getElementById('timer-set-progress').textContent = '';
   document.getElementById('timer-big-number').className = 'timer-big-number work';
   document.getElementById('timer-big-number').textContent = '✓';
@@ -1247,6 +1411,8 @@ function closeTimerOverlay(){
   clearInterval(seqInterval);
   document.getElementById('timer-overlay').onclick = null;
   document.getElementById('timer-overlay').classList.add('hidden');
+  routineQueue = [];
+  routineQueueIndex = -1;
 }
 
 document.getElementById('timer-close-btn').onclick = (e) => { e.stopPropagation(); closeTimerOverlay(); };
@@ -1305,6 +1471,13 @@ if(token && binId){
 } else {
   setSyncStatus('', 'Not connected');
 }
+
+window.addEventListener('beforeunload', (e) => {
+  if(isDirty && token && binId){
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
 </script>
 </body>
 </html>
