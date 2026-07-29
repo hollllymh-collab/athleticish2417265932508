@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Athletic(ish)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -287,6 +290,105 @@
     cursor:pointer;
     box-shadow:0 0 20px rgba(157,123,240,0.35);
   }
+
+  /* Main nav (Routines / Tracker) */
+  .main-nav{
+    display:flex;
+    gap:6px;
+    margin-bottom:18px;
+    border-bottom:1px solid var(--border-soft);
+    padding-bottom:2px;
+  }
+  .nav-tab{
+    background:transparent;
+    border:none;
+    color:var(--text-faint);
+    font-family:'Inter', sans-serif;
+    font-size:13px;
+    font-weight:700;
+    letter-spacing:0.04em;
+    text-transform:uppercase;
+    padding:9px 4px 11px;
+    cursor:pointer;
+    position:relative;
+    margin-right:14px;
+  }
+  .nav-tab.active{color:var(--text);}
+  .nav-tab.active::after{
+    content:'';
+    position:absolute;
+    left:0; right:0; bottom:-2px;
+    height:2px;
+    background:var(--grad);
+    border-radius:2px;
+  }
+  .nav-tab:hover{color:var(--text-dim);}
+
+  /* Tracker view */
+  .tracker-stats{
+    display:grid;
+    grid-template-columns:repeat(3, 1fr);
+    gap:10px;
+    margin-bottom:22px;
+  }
+  .tracker-stat{
+    background:var(--bg-card);
+    border:1px solid var(--border-soft);
+    border-radius:12px;
+    padding:14px 10px;
+    text-align:center;
+  }
+  .tracker-stat-num{
+    display:block;
+    font-family:'JetBrains Mono', monospace;
+    font-size:24px;
+    font-weight:700;
+    background:var(--grad);
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+  }
+  .tracker-stat-label{
+    display:block;
+    font-size:10px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--text-faint);
+    margin-top:4px;
+  }
+  .tracker-day-heading{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--cyan);
+    opacity:0.85;
+    margin:20px 0 8px;
+  }
+  .tracker-day-heading:first-of-type{margin-top:0;}
+  .tracker-entry{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background:var(--bg-card);
+    border:1px solid var(--border-soft);
+    border-radius:10px;
+    padding:11px 14px;
+    margin-bottom:8px;
+  }
+  .tracker-entry-left{display:flex; flex-direction:column; gap:2px;}
+  .tracker-entry-name{font-size:13.5px; font-weight:600; color:var(--text);}
+  .tracker-entry-time{font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--text-faint);}
+  .tracker-entry-remove{
+    background:transparent;
+    border:none;
+    color:var(--text-faint);
+    font-size:16px;
+    cursor:pointer;
+    padding:4px 6px;
+  }
+  .tracker-entry-remove:hover{color:var(--danger);}
 
   /* Routine tabs */
   .routine-tabs{
@@ -735,10 +837,15 @@
   </header>
 
   <main id="main-app">
+    <div class="main-nav">
+      <button class="nav-tab active" data-view="routines">Routines</button>
+      <button class="nav-tab" data-view="tracker">Tracker</button>
+    </div>
     <div id="app-content">
       <div class="routine-tabs" id="routine-tabs"></div>
       <div id="routine-body"></div>
     </div>
+    <div id="tracker-view" class="hidden"></div>
   </main>
 
   <footer>
@@ -803,7 +910,7 @@ function uid(){ return Math.random().toString(36).slice(2, 10); }
 
 function defaultState(){
   const r = { id: uid(), name: 'Routine 1', exercises: [] };
-  return { routines: [r], activeId: r.id };
+  return { routines: [r], activeId: r.id, completions: [] };
 }
 
 /* ---------- jsonbin.io API ---------- */
@@ -998,6 +1105,67 @@ function getActiveRoutine(){
   return state.routines.find(r => r.id === state.activeId) || state.routines[0];
 }
 
+/* ---------- Tracker / completions ---------- */
+
+function dateKeyFromDate(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+
+function todayKey(){ return dateKeyFromDate(new Date()); }
+
+function formatDateHeading(dateKey){
+  const today = todayKey();
+  const yestKey = dateKeyFromDate(new Date(Date.now() - 86400000));
+  if(dateKey === today) return 'Today';
+  if(dateKey === yestKey) return 'Yesterday';
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function formatTime(iso){
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+function logCompletion(routine){
+  if(!state.completions) state.completions = [];
+  const now = new Date();
+  state.completions.unshift({
+    id: uid(),
+    routineId: routine.id,
+    routineName: routine.name || 'Untitled',
+    dateKey: dateKeyFromDate(now),
+    timestamp: now.toISOString()
+  });
+  queueSave();
+  renderTrackerView();
+}
+
+function deleteCompletion(id){
+  state.completions = (state.completions || []).filter(c => c.id !== id);
+  queueSave();
+  renderTrackerView();
+}
+
+function computeStreak(){
+  const completions = state.completions || [];
+  if(!completions.length) return 0;
+  const days = new Set(completions.map(c => c.dateKey));
+  let cursor = new Date();
+  if(!days.has(todayKey())){
+    cursor = new Date(cursor.getTime() - 86400000);
+  }
+  let streak = 0;
+  while(days.has(dateKeyFromDate(cursor))){
+    streak++;
+    cursor = new Date(cursor.getTime() - 86400000);
+  }
+  return streak;
+}
+
 function addRoutine(){
   const num = state.routines.length + 1;
   const r = { id: uid(), name: 'Routine ' + num, exercises: [] };
@@ -1061,6 +1229,7 @@ function renderRoutineBody(){
     </div>
     <div class="routine-actions">
       <button class="start-routine-btn" id="start-routine-btn" ${routine.exercises.length ? '' : 'disabled'}>Start Routine</button>
+      <button class="icon-btn" id="mark-complete-btn" title="Mark complete for today">✓</button>
       <button class="icon-btn" id="delete-routine-btn" title="Delete routine">×</button>
     </div>
   `;
@@ -1073,6 +1242,15 @@ function renderRoutineBody(){
   });
   document.getElementById('delete-routine-btn').onclick = () => deleteRoutine(routine.id);
   document.getElementById('start-routine-btn').onclick = () => startRoutineSequence(routine);
+  document.getElementById('mark-complete-btn').onclick = (e) => {
+    logCompletion(routine);
+    const btn = e.currentTarget;
+    const original = btn.textContent;
+    btn.textContent = '✓✓';
+    btn.style.color = 'var(--good)';
+    btn.style.borderColor = 'var(--good)';
+    setTimeout(() => { btn.textContent = original; btn.style.color = ''; btn.style.borderColor = ''; }, 1200);
+  };
 
   if(routine.exercises.length === 0){
     const empty = document.createElement('div');
@@ -1133,6 +1311,62 @@ function updateRoutineTimeEstimate(routine){
   if(!el) return;
   const totalSeconds = routine.exercises.reduce((sum, ex) => sum + computeExerciseSeconds(ex), 0);
   el.textContent = routine.exercises.length ? ('~' + formatDuration(totalSeconds) + ' total') : '';
+}
+
+function renderTrackerView(){
+  const container = document.getElementById('tracker-view');
+  const completions = state.completions || [];
+
+  if(!completions.length){
+    container.innerHTML = `
+      <div class="tracker-stats"></div>
+      <div class="empty">No routines logged yet. Finish a routine or tap the ✓ next to a routine's name to log it here.</div>
+    `;
+    return;
+  }
+
+  const streak = computeStreak();
+  const weekAgo = Date.now() - 6 * 86400000;
+  const thisWeekCount = completions.filter(c => {
+    const d = new Date(c.timestamp);
+    d.setHours(0,0,0,0);
+    return d.getTime() >= weekAgo;
+  }).length;
+
+  const groups = {};
+  const order = [];
+  completions.forEach(c => {
+    if(!groups[c.dateKey]){ groups[c.dateKey] = []; order.push(c.dateKey); }
+    groups[c.dateKey].push(c);
+  });
+
+  let html = `
+    <div class="tracker-stats">
+      <div class="tracker-stat"><span class="tracker-stat-num">${streak}</span><span class="tracker-stat-label">Day streak</span></div>
+      <div class="tracker-stat"><span class="tracker-stat-num">${thisWeekCount}</span><span class="tracker-stat-label">This week</span></div>
+      <div class="tracker-stat"><span class="tracker-stat-num">${completions.length}</span><span class="tracker-stat-label">All time</span></div>
+    </div>
+  `;
+
+  order.forEach(dateKey => {
+    html += `<div class="tracker-day-heading">${formatDateHeading(dateKey)}</div>`;
+    groups[dateKey].forEach(c => {
+      html += `
+        <div class="tracker-entry">
+          <div class="tracker-entry-left">
+            <span class="tracker-entry-name">${escapeAttr(c.routineName)}</span>
+            <span class="tracker-entry-time">${formatTime(c.timestamp)}</span>
+          </div>
+          <button class="tracker-entry-remove" data-id="${c.id}" title="Remove entry">×</button>
+        </div>
+      `;
+    });
+  });
+
+  container.innerHTML = html;
+  container.querySelectorAll('.tracker-entry-remove').forEach(btn => {
+    btn.onclick = () => deleteCompletion(btn.dataset.id);
+  });
 }
 
 function renderExercise(routine, ex){
@@ -1239,6 +1473,7 @@ function renderExercise(routine, ex){
 
 let routineQueue = [];
 let routineQueueIndex = -1;
+let loggingRoutine = null;
 let sequence = [];
 let seqIndex = -1;
 let seqInterval = null;
@@ -1289,6 +1524,7 @@ function buildSequence(ex){
 function startExerciseSequence(ex){
   routineQueue = [ex];
   routineQueueIndex = 0;
+  loggingRoutine = null;
   document.getElementById('timer-overlay').classList.remove('hidden');
   loadExerciseAtQueueIndex();
 }
@@ -1297,6 +1533,7 @@ function startRoutineSequence(routine){
   if(!routine.exercises.length) return;
   routineQueue = routine.exercises;
   routineQueueIndex = 0;
+  loggingRoutine = routine;
   document.getElementById('timer-overlay').classList.remove('hidden');
   loadExerciseAtQueueIndex();
 }
@@ -1406,6 +1643,10 @@ function finishSequence(){
   document.getElementById('timer-manual-btn').classList.add('hidden');
   tone('done');
   vibrate([150, 80, 150, 80, 300]);
+  if(loggingRoutine){
+    logCompletion(loggingRoutine);
+    loggingRoutine = null;
+  }
   setTimeout(closeTimerOverlay, 1400);
 }
 
@@ -1462,6 +1703,19 @@ function tone(kind){
 function escapeAttr(str){
   return String(str || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 }
+
+/* ---------- Main nav (Routines / Tracker) ---------- */
+
+document.querySelectorAll('.nav-tab').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const view = btn.dataset.view;
+    document.getElementById('app-content').classList.toggle('hidden', view !== 'routines');
+    document.getElementById('tracker-view').classList.toggle('hidden', view !== 'tracker');
+    if(view === 'tracker') renderTrackerView();
+  };
+});
 
 /* ---------- Boot ---------- */
 
