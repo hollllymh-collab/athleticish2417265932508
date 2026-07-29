@@ -689,12 +689,7 @@
   </header>
 
   <main id="main-app">
-    <div id="connect-prompt" class="connect-prompt">
-      <div class="connect-prompt-title">Not connected</div>
-      <p>Connect jsonbin.io to start syncing your routines across devices.</p>
-      <button class="connect-cta-btn" id="open-settings-cta">Open Settings</button>
-    </div>
-    <div id="app-content" class="hidden">
+    <div id="app-content">
       <div class="routine-tabs" id="routine-tabs"></div>
       <div id="routine-body"></div>
     </div>
@@ -830,7 +825,6 @@ function refreshSettingsView(){
 }
 
 document.getElementById('settings-btn').onclick = openSettings;
-document.getElementById('open-settings-cta').onclick = openSettings;
 document.getElementById('settings-close-btn').onclick = closeSettings;
 
 /* ---------- Setup / connect flow ---------- */
@@ -846,6 +840,12 @@ document.getElementById('connect-btn').onclick = async () => {
     return;
   }
 
+  const hasLocalWork = state && state.routines.some(r => r.exercises.length > 0 || r.name !== 'Routine 1');
+  if(binIdVal && hasLocalWork){
+    const ok = confirm('Connecting to an existing bin will replace what\'s currently on screen with that bin\'s data. Continue?');
+    if(!ok) return;
+  }
+
   const btn = document.getElementById('connect-btn');
   btn.disabled = true;
   btn.textContent = 'Connecting…';
@@ -857,12 +857,11 @@ document.getElementById('connect-btn').onclick = async () => {
       binId = binIdVal;
       state = await loadBinData(binId);
     } else {
-      state = defaultState();
-      binId = await createBin(state);
+      binId = await createBin(state || defaultState());
     }
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(BIN_ID_KEY, binId);
-    showApp();
+    render();
     closeSettings();
     setSyncStatus('ok', 'Synced just now');
   }catch(e){
@@ -891,39 +890,30 @@ document.getElementById('disconnect-btn').onclick = () => {
   if(!confirm('Disconnect this device? Your data stays safe in the bin — you can reconnect any time with the same key and Bin ID: ' + binId)) return;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(BIN_ID_KEY);
-  token = null; binId = null; state = null;
-  showConnectPrompt();
+  token = null; binId = null;
   refreshSettingsView();
   setSyncStatus('', 'Not connected');
 };
-
-function showApp(){
-  document.getElementById('connect-prompt').classList.add('hidden');
-  document.getElementById('app-content').classList.remove('hidden');
-  render();
-}
-
-function showConnectPrompt(){
-  document.getElementById('app-content').classList.add('hidden');
-  document.getElementById('connect-prompt').classList.remove('hidden');
-}
 
 async function tryAutoConnect(){
   if(!token || !binId) return;
   try{
     setSyncStatus('busy', 'Loading…');
     state = await loadBinData(binId);
-    showApp();
+    render();
     setSyncStatus('ok', 'Synced just now');
   }catch(e){
     setSyncStatus('err', 'Sync error — check connection');
-    showConnectPrompt();
   }
 }
 
 /* ---------- Debounced save ---------- */
 
 function queueSave(){
+  if(!token || !binId){
+    setSyncStatus('', 'Not connected');
+    return;
+  }
   setSyncStatus('busy', 'Saving…');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
@@ -1306,6 +1296,9 @@ function escapeAttr(str){
 }
 
 /* ---------- Boot ---------- */
+
+state = defaultState();
+render();
 
 if(token && binId){
   tryAutoConnect();
