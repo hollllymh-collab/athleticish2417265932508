@@ -810,10 +810,12 @@ function defaultState(){
 
 async function jbFetch(path, opts = {}){
   const res = await fetch('https://api.jsonbin.io/v3' + path, {
+    cache: 'no-store',
     ...opts,
     headers: {
       'Content-Type': 'application/json',
       'X-Master-Key': token,
+      'Cache-Control': 'no-cache',
       ...(opts.headers || {})
     }
   });
@@ -825,7 +827,7 @@ async function jbFetch(path, opts = {}){
 }
 
 async function loadBinData(id){
-  const result = await jbFetch('/b/' + id + '/latest');
+  const result = await jbFetch('/b/' + id + '/latest?_=' + Date.now());
   return result.record;
 }
 
